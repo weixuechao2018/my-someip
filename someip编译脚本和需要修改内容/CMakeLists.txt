@@ -26,8 +26,8 @@ if (NOT GTEST_ROOT)
     endif()
 endif()
 
-
-include(${PROJECT_BINARY_DIR}/set_someip_config.cmake )
+include(${PROJECT_BINARY_DIR}/set_someip_config.cmake )  # wxc 2021.01.21 add someip配置
+include(${PROJECT_BINARY_DIR}/set_boost_config.cmake )	 # wxc 2021.01.21 add boost配置
 
 ###################################################################################################
 # see http://www.cmake.org/Wiki/CMake/Tutorials/How_to_create_a_ProjectConfig.cmake_file
@@ -73,8 +73,8 @@ if (${CMAKE_SYSTEM_NAME} MATCHES "Android")
     set(NO_DEPRECATED "")
     set(OPTIMIZE "")
 
-    #find_library(ANDROID_LOG_LIB log)
-    #set(OS_LIBS ${ANDROID_LOG_LIB})
+    find_library(ANDROID_LOG_LIB log)
+    set(OS_LIBS ${ANDROID_LOG_LIB})
 endif(${CMAKE_SYSTEM_NAME} MATCHES "Android")
 
 if (${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD")
@@ -141,9 +141,9 @@ endif ()
 
 # Threads
 find_package(Threads REQUIRED)
-include(${PROJECT_BINARY_DIR}/set_boost_config.cmake )
+
 # Boost
-#find_package( Boost 1.55 COMPONENTS system thread filesystem REQUIRED )
+#find_package( Boost 1.55 COMPONENTS system thread filesystem REQUIRED ) # wxc 2021.01.21 屏蔽
 include_directories( ${Boost_INCLUDE_DIR} )
 
 if(Boost_FOUND)
@@ -213,7 +213,7 @@ include_directories(
 )
 
 include_directories(SYSTEM
-    ${VSOMEIP_BOOST_HELPER}
+    ${PROJECT_BINARY_DIR}/${VSOMEIP_BOOST_HELPER} # wxc 2021.01.21修改这里路径查找
     ${DLT_INCLUDE_DIRS}
 )
 
@@ -238,9 +238,11 @@ if (MSVC)
     ADD_DEFINITIONS( -DBOOST_ALL_DYN_LINK )
 else()
     set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D${OS} ${OS_CXX_FLAGS} -g ${OPTIMIZE} -std=c++11 ${NO_DEPRECATED} ${EXPORTSYMBOLS}")
-    if (NOT ${CMAKE_SYSTEM_NAME} MATCHES "Android")
-        #set(USE_RT "rt")
-    endif()
+
+	include(${PROJECT_BINARY_DIR}/set_boost_static_imported_config.cmake )	 # wxc 2021.01.21 add boost配置
+    	if (NOT ${CMAKE_SYSTEM_NAME} MATCHES "Android")
+        	set(USE_RT "rt")
+    	endif()
 endif()
 
 ################################################################################
@@ -590,7 +592,7 @@ endif()
 if (NOT ${CMAKE_SYSTEM_NAME} MATCHES "Android")
     # build routing manager daemon (Non-Windows only)
     if (NOT MSVC)
-    add_subdirectory( examples/routingmanagerd )
+    #add_subdirectory( examples/routingmanagerd )
     endif()
 
     # build tools
