@@ -1,0 +1,553 @@
+#!/bin/bash
+
+SCRIPTDIR="$(cd "$(dirname "$0")"; pwd)" # " # This extra quote fixes syntax highlighting in mcedit
+
+# Add common build methods
+. "$SCRIPTDIR"/build-common.sh
+
+
+BASEPATH=.
+
+# ----------------------------------------------------------------------------------------------------------------------------
+# 需要修改的变量
+
+# 硬件平台架构
+PLATFORM=arm64-v8a
+#PLATFORM=armeabi-v7a
+#PLATFORM=x86    	# android x86
+#PLATFORM=x86_64 	# PC LINUX 这个编译不能用
+
+
+PlatformOS="Android"
+#PlatformOS="Linux"      # linux或 arm linux 下需要编译相关的boost
+
+BUILDTYPE=Debug
+
+CURRENT_BOOST_VERSION=boost-1_70
+CURRENT_BOOST_VERSION_BUILD=boost-1_70_0
+CURRENT_BOOST_VERSION_NUM=1_70
+CURRENT_BOOST_VERSION_NO=107000
+
+# ----------------------------------------------------------------------------------------------------------------------------
+# boost set config
+if [[ "Android" = $PlatformOS ]];
+then
+	CURRENT_BOOST_ROOT_PATH=/media/baiduiovwxc/data/work/someip/my-someip-main/CURRENT_BOOST_VERSION_BUILD/$PLATFORM
+elif [[ "Linux" = $PlatformOS ]];
+then
+	CURRENT_BOOST_ROOT_PATH=~/Downloads/someip/linux_x86_64
+else
+	echo "---------------------------------------------------CURRENT_BOOST_ROOT_PATH config error------------------------------------------------------------"
+fi
+
+# ----------------------------------------------------------------------------------------------------------------------------
+# rm
+rm -rf CMakeCache.txt
+rm -rf CMakeFiles
+rm -rf cmake_install.cmake
+rm -rf Makefilu:wqe
+rm -rf CTestTestfile.cmake
+rm -rf ${BASEPATH}/$PLATFORM
+
+# ----------------------------------------------------------------------------------------------------------------------------
+rm -rf $SCRIPTDIR/set_boost_config.cmake
+rm -rf $SCRIPTDIR/set_someip_config.cmake
+rm -rf $SCRIPTDIR/set_boost_static_imported_config.cmake
+rm -rf $SCRIPTDIR/*.so*
+
+# ----------------------------------------------------------------------------------------------------------------------------
+
+make  clean
+
+
+# ----------------------------------------------------------------------------------------------------------------------------
+PROGRAM_PARAMETERS="<ndk-root>"
+PROGRAM_DESCRIPTION=\
+"       Boost For Android\n"\
+"Copyright (C) 2010 Mystic Tree Games\n"\
+
+extract_parameters $@
+
+
+AndroidNDKRoot=$PARAMETERS
+if [ -z "$AndroidNDKRoot" ] ; then
+  if [ -n "${ANDROID_BUILD_TOP}" ]; then # building from Android sources
+    AndroidNDKRoot="${ANDROID_BUILD_TOP}/prebuilts/ndk/current"
+    export AndroidSourcesDetected=1
+  elif [ -z "`which ndk-build`" ]; then
+    dump "ERROR: You need to provide a <ndk-root>!"
+    exit 1
+  else
+    AndroidNDKRoot=`which ndk-build`
+    AndroidNDKRoot=`dirname $AndroidNDKRoot`
+  fi
+  echo "Using AndroidNDKRoot = $AndroidNDKRoot"
+else
+  # User passed the NDK root as a parameter. Make sure the directory
+  # exists and make it an absolute path. ".cmd" is for Windows support.
+  if [ ! -f "$AndroidNDKRoot/ndk-build" ] && [ ! -f "$AndroidNDKRoot/ndk-build.cmd" ]; then
+    dump "ERROR: $AndroidNDKRoot is not a valid NDK root"
+    exit 1
+  fi
+  AndroidNDKRoot=$(cd $AndroidNDKRoot; pwd -P)
+fi
+export AndroidNDKRoot
+
+NDK_RELEASE_FILE=$AndroidNDKRoot"/RELEASE.TXT"
+if [ -f "${NDK_RELEASE_FILE}" ]; then
+    NDK_RN=`cat $NDK_RELEASE_FILE | sed 's/^r\(.*\)$/\1/g'`
+elif [ -n "${AndroidSourcesDetected}" ]; then
+    if [ -f "${ANDROID_BUILD_TOP}/ndk/docs/CHANGES.html" ]; then
+        NDK_RELEASE_FILE="${ANDROID_BUILD_TOP}/ndk/docs/CHANGES.html"
+        NDK_RN=`grep "android-ndk-" "${NDK_RELEASE_FILE}" | head -1 | sed 's/^.*r\(.*\)$/\1/'`
+    elif [ -f "${ANDROID_BUILD_TOP}/ndk/docs/text/CHANGES.text" ]; then
+        NDK_RELEASE_FILE="${ANDROID_BUILD_TOP}/ndk/docs/text/CHANGES.text"
+        NDK_RN=`grep "android-ndk-" "${NDK_RELEASE_FILE}" | head -1 | sed 's/^.*r\(.*\)$/\1/'`
+    else
+        dump "ERROR: can not find ndk version"
+        exit 1
+    fi
+else
+    NDK_RELEASE_FILE=$AndroidNDKRoot"/source.properties"
+    if [ -f "${NDK_RELEASE_FILE}" ]; then
+        NDK_RN=`cat $NDK_RELEASE_FILE | grep 'Pkg.Revision' | sed -E 's/^.*[=] *([0-9]+[.][0-9]+)[.].*/\1/g'`
+    else
+        dump "ERROR: can not find ndk version"
+        exit 1
+    fi
+fi
+
+echo "Detected Android NDK version $NDK_RN"
+echo "---------------------------------------------------NDK_RELEASE_FILE ${NDK_RELEASE_FILE}-----------------------------------------------------"
+echo "---------------------------------------------------ANDROID_BUILD_TOP ${ANDROID_BUILD_TOP}-----------------------------------------------------"
+echo "---------------------------------------------------AndroidSourcesDetected ${AndroidSourcesDetected}-----------------------------------------------------"
+
+# ----------------------------------------------------------------------------------------------------------------------------
+BUILD_NDK_VERSION_NO=
+NDKPATH=
+CMAKEPATH=
+
+ANDROID_TARGET_32=
+ANDROID_TARGET_64=
+
+if [[ "Linux" = $PlatformOS ]];
+then
+
+NDKPATH=
+CMAKEPATH=
+
+ANDROID_TARGET_32=
+ANDROID_TARGET_64=
+else
+# 不支持 19 NDK VERSION 以下的版本编译
+# 编译使用android ndk version
+BUILD_NDK_VERSION_NO=18.1.5063045
+#BUILD_NDK_VERSION_NO=19.2.5345600
+#BUILD_NDK_VERSION_NO=21.0.6113669
+#BUILD_NDK_VERSION_NO=21.4.7075529
+
+#因为19 NDK VERSION以上和以下交叉编译工具存储结构不一样
+BUILD_NDK_VERSION_NO_TEST=${BUILD_NDK_VERSION_NO}
+BUILD_NDK_VERSION_NO_TEST=$(echo ${BUILD_NDK_VERSION_NO_TEST%%.*})
+
+BUILD_NDK_VERSION_NO_FIX=19
+BUILD_NDK_VERSION_NO_STATUS=0
+
+echo "---------------------------------------------------BUILD_NDK_VERSION_NO_TEST = ${BUILD_NDK_VERSION_NO_TEST}-------------------------------------------------------------------"
+echo "---------------------------------------------------BUILD_NDK_VERSION_NO_FIX = ${BUILD_NDK_VERSION_NO_FIX}-------------------------------------------------------------------"
+
+if [ $BUILD_NDK_VERSION_NO_FIX == $BUILD_NDK_VERSION_NO_TEST ]
+then
+	BUILD_NDK_VERSION_NO_STATUS=1
+elif [ $BUILD_NDK_VERSION_NO_TEST -gt $BUILD_NDK_VERSION_NO_FIX ]
+then
+	BUILD_NDK_VERSION_NO_STATUS=1
+elif [ $BUILD_NDK_VERSION_NO_TEST -lt $BUILD_NDK_VERSION_NO_FIX ]
+then
+	BUILD_NDK_VERSION_NO_STATUS=0
+fi
+
+echo "---------------------------------------------------BUILD_NDK_VERSION_NO_STATUS = ${BUILD_NDK_VERSION_NO_STATUS}-------------------------------------------------------------------"
+
+NDKPATH=~/Android/Sdk/ndk/$BUILD_NDK_VERSION_NO
+CMAKEPATH=~/Android/Sdk/cmake/3.18.1/bin
+
+ANDROID_TARGET_32=21
+ANDROID_TARGET_64=21
+
+register_option "--target-version=<version>" select_target_version \
+                "Select Android's target version" "$ANDROID_TARGET_32"
+select_target_version () {
+
+    if [ "$1" -lt 16 ]; then
+        ANDROID_TARGET_32="16"
+        ANDROID_TARGET_64="21"
+    elif [ "$1" = 20 ]; then
+        ANDROID_TARGET_32="19"
+        ANDROID_TARGET_64="21"
+    elif [ "$1" -lt 21 ]; then
+        ANDROID_TARGET_32="$1"
+        ANDROID_TARGET_64="21"
+    elif [ "$1" = 25 ]; then
+        ANDROID_TARGET_32="24"
+        ANDROID_TARGET_64="24"
+    else
+        ANDROID_TARGET_32="$1"
+        ANDROID_TARGET_64="$1"
+    fi
+}
+
+fi
+
+case "$NDK_RN" in
+	4*)
+		TOOLCHAIN=${TOOLCHAIN:-arm-eabi-4.4.0}
+		CXXPATH=$AndroidNDKRoot/build/prebuilt/$PlatformOS-x86/${TOOLCHAIN}/bin/arm-eabi-g++
+		TOOLSET=gcc-androidR4
+		;;
+	5*)
+		TOOLCHAIN=${TOOLCHAIN:-arm-linux-androideabi-4.4.3}
+		CXXPATH=$AndroidNDKRoot/toolchains/${TOOLCHAIN}/prebuilt/$PlatformOS-x86/bin/arm-linux-androideabi-g++
+		TOOLSET=gcc-androidR5
+		;;
+	7-crystax-5.beta3)
+		TOOLCHAIN=${TOOLCHAIN:-arm-linux-androideabi-4.6.3}
+		CXXPATH=$AndroidNDKRoot/toolchains/${TOOLCHAIN}/prebuilt/$PlatformOS-x86/bin/arm-linux-androideabi-g++
+		TOOLSET=gcc-androidR7crystax5beta3
+		;;
+	8)
+		TOOLCHAIN=${TOOLCHAIN:-arm-linux-androideabi-4.4.3}
+		CXXPATH=$AndroidNDKRoot/toolchains/${TOOLCHAIN}/prebuilt/$PlatformOS-x86/bin/arm-linux-androideabi-g++
+		TOOLSET=gcc-androidR8
+		;;
+	8b|8c|8d)
+		TOOLCHAIN=${TOOLCHAIN:-arm-linux-androideabi-4.6}
+		CXXPATH=$AndroidNDKRoot/toolchains/${TOOLCHAIN}/prebuilt/$PlatformOS-x86/bin/arm-linux-androideabi-g++
+		TOOLSET=gcc-androidR8b
+		;;
+	8e|9|9b|9c|9d)
+		TOOLCHAIN=${TOOLCHAIN:-arm-linux-androideabi-4.6}
+		CXXPATH=$AndroidNDKRoot/toolchains/${TOOLCHAIN}/prebuilt/$PlatformOS-x86/bin/arm-linux-androideabi-g++
+		TOOLSET=gcc-androidR8e
+		;;
+	"8e (64-bit)")
+		TOOLCHAIN=${TOOLCHAIN:-arm-linux-androideabi-4.6}
+		CXXPATH=$AndroidNDKRoot/toolchains/${TOOLCHAIN}/prebuilt/${PlatformOS}-x86_64/bin/arm-linux-androideabi-g++
+		TOOLSET=gcc-androidR8e
+		;;
+	"9 (64-bit)"|"9b (64-bit)"|"9c (64-bit)"|"9d (64-bit)")
+		TOOLCHAIN=${TOOLCHAIN:-arm-linux-androideabi-4.6}
+		CXXPATH=$AndroidNDKRoot/toolchains/${TOOLCHAIN}/prebuilt/${PlatformOS}-x86_64/bin/arm-linux-androideabi-g++
+		TOOLSET=gcc-androidR8e
+		;;
+	"10 (64-bit)"|"10b (64-bit)"|"10c (64-bit)"|"10d (64-bit)")
+		TOOLCHAIN=${TOOLCHAIN:-arm-linux-androideabi-4.6}
+		CXXPATH=$AndroidNDKRoot/toolchains/${TOOLCHAIN}/prebuilt/${PlatformOS}-x86_64/bin/arm-linux-androideabi-g++
+		TOOLSET=gcc-androidR8e
+		;;
+	"10 (64-bit)"|"10b (64-bit)"|"10c (64-bit)"|"10d (64-bit)")
+		TOOLCHAIN=${TOOLCHAIN:-arm-linux-androideabi-4.6}
+		CXXPATH=$AndroidNDKRoot/toolchains/${TOOLCHAIN}/prebuilt/${PlatformOS}-x86_64/bin/arm-linux-androideabi-g++
+		TOOLSET=gcc-androidR8e
+		;;
+	"16.0"|"16.1"|"17.1"|"17.2"|"18.0"|"18.1")
+		TOOLCHAIN=${TOOLCHAIN:-llvm}
+		CXXPATH=$AndroidNDKRoot/toolchains/${TOOLCHAIN}/prebuilt/${PlatformOS}-x86_64/bin/clang++
+		TOOLSET=clang
+		;;
+	"19.0"|"19.1"|"19.2"|"20.0"|"20.1"|"21.0"|"21.1"|"21.2"|"21.3"|"21.4")
+		TOOLCHAIN=${TOOLCHAIN:-llvm}
+		CXXPATH=$AndroidNDKRoot/toolchains/${TOOLCHAIN}/prebuilt/${PlatformOS}-x86_64/bin/clang++
+		TOOLSET=clang
+		CONFIG_VARIANT=ndk19
+		;;
+	"22.1"|"23.0"|"23.1"|"25.0"|"25.1")
+		TOOLCHAIN=${TOOLCHAIN:-llvm}
+		CXXPATH=$AndroidNDKRoot/toolchains/${TOOLCHAIN}/prebuilt/${PlatformOS}-x86_64/bin/clang++
+		TOOLSET=clang
+		CONFIG_VARIANT=ndk23
+		;;
+	*)
+		echo "Undefined or not supported Android NDK version: $NDK_RN"
+		exit 1
+esac
+
+if [ -n "${AndroidSourcesDetected}" -a "${TOOLSET}" '!=' "clang" ]; then # Overwrite CXXPATH if we are building from Android sources
+    CXXPATH="${ANDROID_TOOLCHAIN}/arm-linux-androideabi-g++"
+fi
+
+echo "---------------------------------------------------$LINENO TOOLCHAIN=${TOOLCHAIN}--------------------------------------------------------------"
+echo "---------------------------------------------------$LINENO CXXPATH=${CXXPATH}------------------------------------------------------------------"
+echo "---------------------------------------------------$LINENO TOOLSET=${TOOLSET}------------------------------------------------------------------"
+
+#
+AndroidBinariesPath=
+ANDROID_PLATFORMS_LOG_VER=
+if [[ "arm64-v8a" = $PLATFORM ]];
+then
+	if [[ "Android" = $PlatformOS ]];
+	then
+		if [ 1 -eq $BUILD_NDK_VERSION_NO_STATUS ];
+		then
+			echo "---------------------------------------------------Android arm64-v8a $LINENO ${BUILD_NDK_VERSION_NO}-------------------------------------------------------------------"
+			AndroidBinariesPath=~/Android/Sdk/ndk/$BUILD_NDK_VERSION_NO/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android$ANDROID_TARGET_64-
+			#sed -i '/find_package( Boost 1.55 COMPONENTS system thread filesystem REQUIRED )/d' $SCRIPTDIR/CMakeLists.txt
+			ANDROID_PLATFORMS_LOG_VER=$ANDROID_TARGET_64
+			echo "set(ANDROID_LOG_LIB ${NDKPATH}/platforms)" >> $SCRIPTDIR/set_someip_config.cmake 	#为了解决android log编译错误
+		elif [ 0 -eq $BUILD_NDK_VERSION_NO_STATUS ];
+		then
+			echo "---------------------------------------------------Android arm64-v8a $LINENO ${BUILD_NDK_VERSION_NO}-------------------------------------------------------------------"
+			AndroidBinariesPath=~/Android/Sdk/ndk/$BUILD_NDK_VERSION_NO/toolchains/llvm/prebuilt/linux-x86_64/bin/
+			#sed -i '/find_package( Boost 1.55 COMPONENTS system thread filesystem REQUIRED )/d' $SCRIPTDIR/CMakeLists.txt
+			ANDROID_PLATFORMS_LOG_VER=$ANDROID_TARGET_64
+			echo "set(ANDROID_LOG_LIB ${NDKPATH}/platforms)" >> $SCRIPTDIR/set_someip_config.cmake 	#为了解决android log编译错误
+		else
+			echo "---------------------------------------------------Android arm64-v8a $LINENO ${BUILD_NDK_VERSION_NO} error------------------------------------------------------------"
+		fi
+	elif [[ "Linux" = $PlatformOS ]];
+	then
+		echo "---------------------------------------------------linux arm64-v8a-------------------------------------------------------------------"
+	else
+		echo "---------------------------------------------------arm64-v8a config error------------------------------------------------------------"
+	fi
+elif [[ "armeabi-v7a" = $PLATFORM ]];
+then
+	if [[ "Android" = $PlatformOS ]];
+	then
+		if [ 1 -eq $BUILD_NDK_VERSION_NO_STATUS ];
+		then
+			echo "---------------------------------------------------Android armeabi-v7a ${BUILD_NDK_VERSION_NO}-------------------------------------------------------------------"
+			AndroidBinariesPath=~/Android/Sdk/ndk/$BUILD_NDK_VERSION_NO/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi$ANDROID_TARGET_32-
+			#sed -i '/find_package( Boost 1.55 COMPONENTS system thread filesystem REQUIRED )/d' $SCRIPTDIR/CMakeLists.txt
+			ANDROID_PLATFORMS_LOG_VER=$ANDROID_TARGET_32
+			echo "set(ANDROID_LOG_LIB ${NDKPATH}/platforms)" >> $SCRIPTDIR/set_someip_config.cmake	#为了解决android log编译错误
+		elif [ 0 -eq $BUILD_NDK_VERSION_NO_STATUS ];
+		then
+			echo "---------------------------------------------------Android armeabi-v7a ${BUILD_NDK_VERSION_NO}-------------------------------------------------------------------"
+		else
+			echo "---------------------------------------------------Android armeabi-v7a ${BUILD_NDK_VERSION_NO} error-------------------------------------------------------------------"
+		fi
+	elif [[ "Linux" = $PlatformOS ]];
+	then
+		echo "---------------------------------------------------linux armeabi-v7a-------------------------------------------------------------------"
+	else
+		echo "---------------------------------------------------armeabi-v7a config error------------------------------------------------------------"
+	fi
+elif [[ "x86" = $PLATFORM ]];
+then
+	if [[ "Android" = $PlatformOS ]];
+	then
+		echo "---------------------------------------------------Android x86-------------------------------------------------------------------"
+		AndroidBinariesPath=~/Android/Sdk/ndk/$BUILD_NDK_VERSION_NO/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android$ANDROID_TARGET_32-
+		ANDROID_PLATFORMS_LOG_VER=$ANDROID_TARGET_32
+		echo "set(ANDROID_LOG_LIB ${NDKPATH}/platforms)" >> $SCRIPTDIR/set_someip_config.cmake	#为了解决android log编译错误
+		#echo "set(LOCAL_CFLAGS += -m32)" >> $SCRIPTDIR/set_someip_config.cmake
+		#echo "set(LOCAL_CFLAGS += -m32)" >> $SCRIPTDIR/set_someip_config.cmake
+
+		#echo "set(ADDRESS_MODEL 32)" >> $SCRIPTDIR/set_someip_config.cmake
+		#echo "set(NODE_TARGET x86)" >> $SCRIPTDIR/set_someip_config.cmake
+
+	else
+		echo "---------------------------------------------------x86 config error-------------------------------------------------------------------"
+	fi
+else [[ "x86_64" = $PLATFORM ]];
+	if [[ "Android" = $PlatformOS ]];
+	then
+		echo "---------------------------------------------------Android x86-------------------------------------------------------------------"
+		AndroidBinariesPath=~/Android/Sdk/ndk/$BUILD_NDK_VERSION_NO/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android$ANDROID_TARGET_64-
+		ANDROID_PLATFORMS_LOG_VER=$ANDROID_TARGET_64
+		echo "set(ANDROID_LOG_LIB ${NDKPATH}/platforms)" >> $SCRIPTDIR/set_someip_config.cmake	#为了解决android log编译错误
+		#echo "set(LOCAL_CFLAGS += -m64)" >> $SCRIPTDIR/set_someip_config.cmake
+		#echo "set(LOCAL_CFLAGS += -m64)" >> $SCRIPTDIR/set_someip_config.cmake
+		
+		#echo "set(ADDRESS_MODEL 64)" >> $SCRIPTDIR/set_someip_config.cmake
+		#echo "set(NODE_TARGET x64)" >> $SCRIPTDIR/set_someip_config.cmake
+	else
+		echo "---------------------------------------------------x86 config error-------------------------------------------------------------------"
+	fi
+fi
+
+echo "AndroidBinariesPath:$AndroidBinariesPath"
+
+
+# ----------------------------------------------------------------------------------------------------------------------------
+#echo "add_definitions(-DAndroid)" >> $SCRIPTDIR/set_someip_config.cmake 
+#echo "add_definitions(-DSystemD_FOUND)" >> $SCRIPTDIR/set_someip_config.cmake
+
+if [[ "Android" = $PlatformOS ]];
+then
+	echo "set(CMAKE_SYSTEM_NAME $PlatformOS)" >> $SCRIPTDIR/set_someip_config.cmake
+
+	if [[ "x86_64" != $PLATFORM ]];
+	then
+		echo "set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DWITHOUT_SYSTEMD")" >> $SCRIPTDIR/set_someip_config.cmake
+	fi
+	
+	echo "set(CMAKE_INSTALL_PREFIX ${BASEPATH}/$PLATFORM)" >> $SCRIPTDIR/set_someip_config.cmake
+
+	#set (SystemD_FOUND 1)
+
+	echo "set(BOOST_ROOT $CURRENT_BOOST_ROOT_PATH)" >> $SCRIPTDIR/set_boost_config.cmake 
+	echo "set(BOOST_INCLUDEDIR $CURRENT_BOOST_ROOT_PATH/include/$CURRENT_BOOST_VERSION)" >> $SCRIPTDIR/set_boost_config.cmake 
+	echo "set(BOOST_LIBRARYDIR $CURRENT_BOOST_ROOT_PATH/lib)" >> $SCRIPTDIR/set_boost_config.cmake  
+	echo "set(Boost_FOUND 1)" >> $SCRIPTDIR/set_boost_config.cmake 
+	echo "set(Boost_INCLUDE_DIR $CURRENT_BOOST_ROOT_PATH/include/$CURRENT_BOOST_VERSION)" >> $SCRIPTDIR/set_boost_config.cmake 
+	echo "set(Boost_LIBRARY_DIR $CURRENT_BOOST_ROOT_PATH/lib)" >> $SCRIPTDIR/set_boost_config.cmake  
+	echo "set(Boost_VERSION $CURRENT_BOOST_VERSION_NO)" >> $SCRIPTDIR/set_boost_config.cmake 
+
+elif [[ "Linux" = $PlatformOS ]];
+then
+	echo "set(CMAKE_SYSTEM_NAME $PlatformOS)" >> $SCRIPTDIR/set_someip_config.cmake
+
+	echo "set(CMAKE_INSTALL_PREFIX ${BASEPATH}/$PLATFORM)" >> $SCRIPTDIR/set_someip_config.cmake
+
+	#set (SystemD_FOUND 1)
+	
+	echo "set(BOOST_ROOT $CURRENT_BOOST_ROOT_PATH)" >> $SCRIPTDIR/set_boost_config.cmake 
+	echo "set(BOOST_INCLUDEDIR $CURRENT_BOOST_ROOT_PATH/include/$CURRENT_BOOST_VERSION)" >> $SCRIPTDIR/set_boost_config.cmake 
+	echo "set(BOOST_LIBRARYDIR $CURRENT_BOOST_ROOT_PATH/lib)" >> $SCRIPTDIR/set_boost_config.cmake  
+	echo "set(Boost_FOUND 1)" >> $SCRIPTDIR/set_boost_config.cmake 
+	echo "set(Boost_INCLUDE_DIR $CURRENT_BOOST_ROOT_PATH/include/$CURRENT_BOOST_VERSION)" >> $SCRIPTDIR/set_boost_config.cmake 
+	echo "set(Boost_LIBRARY_DIR $CURRENT_BOOST_ROOT_PATH/lib)" >> $SCRIPTDIR/set_boost_config.cmake  
+	echo "set(Boost_VERSION $CURRENT_BOOST_VERSION_NO)" >> $SCRIPTDIR/set_boost_config.cmake 
+else
+	echo "---------------------------------------------------set_someip_config.cmake config error-----------------------------------------------------"
+fi
+
+
+ARCH_BIT=
+
+
+if [[ "Android" = $PlatformOS ]];
+then
+	if [[ "armeabi-v7a" = $PLATFORM ]];
+	then
+		ARCH_BIT="a32"
+	elif [[ "arm64-v8a" = $PLATFORM ]];
+	then
+		ARCH_BIT="a64"	
+	elif [[ "x86" = $PLATFORM ]];
+	then
+		ARCH_BIT="x32"
+	elif [[ "x86_64" = $PLATFORM ]];
+	then
+		ARCH_BIT="x64"
+	else
+		exit 1
+	fi
+elif [[ "Linux" = $PlatformOS ]];
+then
+	if [[ "armeabi-v7a" = $PLATFORM ]];
+	then
+		ARCH_BIT="a32"
+	elif [[ "arm64-v8a" = $PLATFORM ]];
+	then
+		ARCH_BIT="a64"	
+	elif [[ "x86" = $PLATFORM ]];
+	then
+		ARCH_BIT="x32"
+	elif [[ "x86_64" = $PLATFORM ]];
+	then
+		ARCH_BIT="x64"
+	else
+		exit 1
+	fi
+else
+	echo "---------------------------------------------------set_someip_config.cmake config error-----------------------------------------------------"
+fi
+
+# ----------------------------------------------------------------------------------------------------------------------------
+export PATH=$AndroidBinariesPath:$PATH
+export AndroidNDKRoot=$AndroidBinariesPath
+export AndroidTargetVersion32=$ANDROID_TARGET_32
+export AndroidTargetVersion64=$ANDROID_TARGET_64
+export NO_BZIP2=1
+export PlatformOS=$PlatformOS
+
+if [[ "Android" = $PlatformOS ]];
+then
+	${CMAKEPATH}/cmake \
+		-DCMAKE_INSTALL_PREFIX=${BASEPATH}/$PLATFORM \
+		-DCMAKE_TOOLCHAIN_FILE=${NDKPATH}/build/cmake/android.toolchain.cmake \
+		-DANDROID_ABI=${PLATFORM} \
+		-DCMAKE_ANDROID_ARCH_ABI=${PLATFORM} \
+		-DANDROID_NDK=${NDKPATH} \
+		-DCMAKE_ANDROID_NDK=${NDKPATH} \
+		-DANDROID_NATIVE_API_LEVEL=21 \
+		-DANDROID_PLATFORM=android-$ANDROID_PLATFORMS_LOG_VER \
+		-DCMAKE_SYSTEM_VERSION=$ANDROID_PLATFORMS_LOG_VER \
+		-DCMAKE_SYSTEM_NAME=Android \
+		-DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+		-DANDROID_STL=c++_shared \
+		-DCMAKE_BUILD_TYPE=${BUILDTYPE} \
+		-DANDROID_TOOLCHAIN=clang \
+		-DCMAKE_C_COMPILER=${AndroidBinariesPath}clang \
+		-DCMAKE_CXX_COMPILER=${AndroidBinariesPath}clang++ \
+		-DENABLE_COMPAT=1 \
+		-DVSOMEIP_INSTALL_ROUTINGMANAGERD=ON \
+		-DENABLE_MULTIPLE_ROUTING_MANAGERS=1 \
+		${BASEPATH}
+elif [[ "Linux" = $PlatformOS ]]; 
+then
+	if [[ "x86_64" = $PLATFORM ]] && [[ "x86" = $PlatformOS ]];
+	then
+		cmake \
+			-DCMAKE_INSTALL_PREFIX=${BASEPATH}/linux_$PLATFORM \
+			-DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+			-DCMAKE_BUILD_TYPE=${BUILDTYPE} \
+			-DCMAKE_C_COMPILER=${AndroidBinariesPath}gcc \
+			-DCMAKE_CXX_COMPILER=${AndroidBinariesPath}g++ \
+			-DENABLE_COMPAT=1 \
+			-DVSOMEIP_INSTALL_ROUTINGMANAGERD=ON \
+			-DENABLE_MULTIPLE_ROUTING_MANAGERS=1 \
+			${BASEPATH}
+	else # arm linux下编译暂时用不到还未实现
+	${CMAKEPATH}/cmake \
+		-DCMAKE_INSTALL_PREFIX=${BASEPATH}/$PLATFORM \
+		-DCMAKE_TOOLCHAIN_FILE=${NDKPATH}/build/cmake/android.toolchain.cmake \
+		-DANDROID_ABI=${PLATFORM} \
+		-DCMAKE_ANDROID_ARCH_ABI=${PLATFORM} \
+		-DANDROID_NDK=${NDKPATH} \
+		-DCMAKE_ANDROID_NDK=${NDKPATH} \
+		-DANDROID_NATIVE_API_LEVEL=21 \
+		-DANDROID_PLATFORM=android-19 \
+		-DCMAKE_SYSTEM_VERSION=19 \
+		-DCMAKE_SYSTEM_NAME=Android \
+		-DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+		-DANDROID_STL=c++_shared \
+		-DCMAKE_BUILD_TYPE=${BUILDTYPE} \
+		-DANDROID_TOOLCHAIN=clang \
+		-DCMAKE_C_COMPILER=${AndroidBinariesPath}clang \
+		-DCMAKE_CXX_COMPILER=${AndroidBinariesPath}clang++ \
+		-DENABLE_COMPAT=1 \
+		-DVSOMEIP_INSTALL_ROUTINGMANAGERD=ON \
+		-DENABLE_MULTIPLE_ROUTING_MANAGERS=1 \
+		${BASEPATH}
+	fi
+else
+	echo "---------------------------------------------------cmake build error------------------------------------------------------------"
+fi
+	
+
+make VERBOSE=1
+make install
+set +x
+
+
+
+#-H/Users/apple/development/CxxTest/app/src/main/cpp # 源码目录,AS特有(可选,as的cmake必要)
+#-B/Users/apple/development/CxxTest/app/.cxx/cmake/debug/arm64-v8a # 编译产出的临时文件目录, AS特有 (可选, as的cmake必要)
+#-DCMAKE_CXX_FLAGS=-std=c++14 # c++附加的编译参数, 这里意思采用c++14标准编译 (可选)
+#-DCMAKE_BUILD_TYPE=Debug # 编译类型, Debug/Release, Release模式下so会小一点,删除了符号表.
+#-DCMAKE_TOOLCHAIN_FILE=/Users/apple/developer/AndroidSDK/ndk/21.3.6528147/build/cmake/android.toolchain.cmake # 工具链文件路径(必要,重要)
+#-DCMAKE_ANDROID_ARCH_ABI=arm64-v8a # 架构类型(必要)
+#-DANDROID_ABI=arm64-v8a # (可选)
+#-DCMAKE_ANDROID_NDK=/Users/apple/developer/AndroidSDK/ndk/21.3.6528147 # (必要)
+#-DANDROID_NDK=/Users/apple/developer/AndroidSDK/ndk/21.3.6528147 # (可选)
+#-DANDROID_PLATFORM=android-19 # 最小支持版本(可选)
+#-DCMAKE_EXPORT_COMPILE_COMMANDS=ON # 是否导出详细编译参数(可选)
+#-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=/Users/apple/development/CxxTest/app/build/intermediates/cmake/debug/obj/arm64-v8a # lib临时目录(可选)
+#-DCMAKE_MAKE_PROGRAM=/Users/apple/developer/AndroidSDK/cmake/3.10.2.4988404/bin/ninja # 构建工具, 根据需要(可选)
+#-DCMAKE_SYSTEM_NAME=Android # 系统名称(必要,重要)
+#-DCMAKE_SYSTEM_VERSION=19 # 最小支持版本(必要)
+#-GNinja # 生成类型, ninja据说比make要快, 默认生成Makefile (可选)
